@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Mileage Ledger</title>
+<script src="https://cdn.plaid.com/link/v2/stable/link-initialize.js"></script>
+<style>
+  :root {
+    --bg: #0f1115;
+    --card: #171a21;
+    --border: #262b35;
+    --text: #eef0f3;
+    --muted: #8b91a0;
+    --accent: #4ade80;
+    --debit: #f87171;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    padding: 24px 16px 60px;
+  }
+  .wrap { max-width: 480px; margin: 0 auto; }
+  h1 { font-size: 15px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em; margin: 0 0 4px; }
+  .balance { font-size: 48px; font-weight: 700; margin: 0 0 20px; letter-spacing: -0.02em; }
+  .balance.negative { color: var(--debit); }
+  .lifetime-row { display: flex; gap: 12px; margin-bottom: 24px; }
+  .lifetime-card { flex: 1; background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; }
+  .lifetime-card .label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 4px; }
+  .lifetime-card .value { font-size: 20px; font-weight: 600; }
+  .section { margin-top: 28px; }
+  .section h2 { font-size: 13px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; margin: 0 0 10px; }
+  .breakdown-row { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid var(--border); font-size: 14px; }
+  .breakdown-row:last-child { border-bottom: none; }
+  .history-item { display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid var(--border); font-size: 14px; }
+  .history-item .amount.credit { color: var(--accent); }
+  .history-item .amount.debit { color: var(--debit); }
+  .history-item .meta { color: var(--muted); font-size: 12px; }
+  button {
+    background: var(--accent); color: #0f1115; border: none; border-radius: 8px;
+    padding: 12px 18px; font-size: 14px; font-weight: 600; cursor: pointer; width: 100%;
+  }
+  button:disabled { opacity: 0.5; cursor: default; }
+  .connect-row { margin-top: 24px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Current Balance</h1>
+  <div class="balance" id="balance">--</div>
+
+  <div class="lifetime-row">
+    <div class="lifetime-card">
+      <div class="label">Lifetime Earned</div>
+      <div class="value" id="lifetime-earned">--</div>
+    </div>
+    <div class="lifetime-card">
+      <div class="label">Lifetime Spent</div>
+      <div class="value" id="lifetime-spent">--</div>
+    </div>
+  </div>
+
+  <div class="section">
+    <h2>Earned by Activity</h2>
+    <div id="earnings-list"></div>
+  </div>
+
+  <div class="section">
+    <h2>Spent by Category</h2>
+    <div id="spending-list"></div>
+  </div>
+
+  <div class="section">
+    <h2>Recent Activity</h2>
+    <div id="history-list"></div>
+  </div>
+
+  <div class="connect-row">
+    <button id="connect-btn">Connect Bank Account</button>
+  </div>
+</div>
+
+<script>
+  const fmt = (n) => '$' + Number(n).toFixed(2);
+
+  async function loadBalance() {
+    const res = await fetch('/api/balance');
+    const data = await res.json();
+    const balEl = document.getElementById('balance');
+    balEl.textContent = fmt(data.currentBalance);
+    balEl.classList.toggle('negative', data.currentBalance < 0);
+    document.getElementById('lifetime-earned').textContent = fmt(data.lifetimeEarned);
+    document.getElementById('lifetime-spent').textContent = fmt(data.lifetimeSpent);
+  }
+
+  async function loadEarnings() {
+    const res = await fetch('/api/earnings-by-type');
+    const rows = await res.json();
+    document.getElementById('earnings-list').innerHTML = rows.map(r =>
+      `<div class="breakdown-row"><span>${r.activityType}</span><span>${fmt(r.total)}</span></div>`
+    ).join('') || '<div class="breakdown-row"><span>No activities logged yet</span></div>';
+  }
+
+  async function loadSpending() {
+    const res = await fetch('/api/spending-by-category');
+    const rows = await res.json();
+    document.getElementById('spending-list').innerHTML = rows.map(r =>
+      `<div class="breakdown-row"><span>${r.category}</span><span>${fmt(r.total)}</span></div>`
+    ).join('') || '<div class="breakdown-row"><span>No purchases yet</span></div>';
+  }
+
+  async function loadHistory() {
+    const res = await fetch('/api/history?limit=20');
+    const rows = await res.json();
+    document.getElementById('history-list').innerHTML = rows.map(r => `
+      <div class="history-item">
+        <div>
+          <div>${r.label}</div>
+          <div class="meta">${new Date(r.occurred_at).toLocaleDateString()}</div>
+        </div>
+        <div class="amount ${r.kind}">${r.kind === 'debit' ? '-' : '+'}${fmt(r.amount)}</div>
+      </div>
+    `).join('') || '<div class="history-item"><span>Nothing yet</span></div>';
+  }
+
+  function refreshAll() {
+    loadBalance();
+    loadEarnings();
+    loadSpending();
+    loadHistory();
+  }
+
+  refreshAll();
+  setInterval(refreshAll, 30000); // poll every 30s for near-live updates
+
+  document.getElementById('connect-btn').addEventListener('click', async () => {
+    const res = await fetch('/plaid/link-token', { method: 'POST' });
+    const { link_token } = await res.json();
+
+    const handler = Plaid.create({
+      token: link_token,
+      onSuccess: async (public_token) => {
+        await fetch('/plaid/exchange-token', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ public_token }),
+        });
+        alert('Bank connected!');
+      },
+    });
+    handler.open();
+  });
+</script>
+</body>
+</html>

@@ -1,0 +1,19 @@
+{
+  "name": "mileage-ledger",
+  "version": "1.0.0",
+  "description": "Strava mileage -> spending balance tracker",
+  "main": "src/server.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js",
+    "db:init": "node src/db/init.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "pg": "^8.11.5",
+    "axios": "^1.7.2",
+    "dotenv": "^16.4.5",
+    "plaid": "^24.0.0"
+  }
+}
