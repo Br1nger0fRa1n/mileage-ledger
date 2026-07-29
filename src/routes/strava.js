@@ -53,7 +53,7 @@ router.get('/callback', async (req, res) => {
 
     res.send('Strava connected. You can close this tab.');
   } catch (err) {
-    console.error('Strava token exchange failed:', err.response?.data || err.message);
+    console.error('Strava token exchange failed:', err.response?.status, err.response?.data, err.message);
     res.status(500).send('Strava token exchange failed. Check server logs.');
   }
 });
