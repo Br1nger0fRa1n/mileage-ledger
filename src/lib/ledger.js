@@ -48,7 +48,7 @@ async function getBalanceSummary() {
   const { rows } = await pool.query(`
     SELECT
       COALESCE((SELECT SUM(credit_amount) FROM activities), 0) AS lifetime_earned,
-      COALESCE((SELECT SUM(amount) FROM transactions WHERE excluded = false), 0) AS lifetime_spent
+      COALESCE((SELECT SUM(amount) FROM transactions WHERE excluded = false AND amount > 0), 0) AS lifetime_spent
   `);
   const lifetimeEarned = parseFloat(rows[0].lifetime_earned);
   const lifetimeSpent = parseFloat(rows[0].lifetime_spent);
@@ -75,7 +75,7 @@ async function getSpendingByCategory() {
   const { rows } = await pool.query(`
     SELECT COALESCE(category_override, plaid_category, 'Uncategorized') AS category, SUM(amount) AS total
     FROM transactions
-    WHERE excluded = false
+    WHERE excluded = false AND amount > 0
     GROUP BY category
     ORDER BY total DESC
   `);
