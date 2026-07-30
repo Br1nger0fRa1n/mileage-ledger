@@ -9,7 +9,7 @@ const authRouter = require('./routes/auth');
 const { sessionMiddleware, requireAuth } = require('./middleware/auth');
 
 const app = express();
-
+app.set('trust proxy', 1);
 // Strava/Plaid webhooks send JSON bodies -- parse for all routes except
 // Plaid's webhook, which applies its own json() middleware inline
 // (kept identical here for simplicity; express.json() is idempotent-safe).
