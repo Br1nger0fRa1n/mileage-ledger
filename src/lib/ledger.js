@@ -31,6 +31,7 @@ async function recordActivityCredit({ stravaId, activityType, distanceMeters, st
  * Idempotent on plaid_transaction_id.
  */
 async function recordTransactionDebit({ plaidTransactionId, merchantName, amount, plaidCategory, postedAt, pending = false, source = 'plaid' }) {
+  if (amount < 0) return null;
   const result = await pool.query(
     `INSERT INTO transactions (plaid_transaction_id, merchant_name, amount, plaid_category, posted_at, pending, source)
      VALUES ($1, $2, $3, $4, $5, $6, $7)
