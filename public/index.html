@@ -45,10 +45,32 @@
   }
   button:disabled { opacity: 0.5; cursor: default; }
   .connect-row { margin-top: 24px; }
+
+  .warning-banner {
+    background: #3a2020; border: 1px solid #6b3232; color: #fca5a5;
+    border-radius: 10px; padding: 12px 14px; font-size: 13px; margin-bottom: 20px;
+  }
+  .goal-card { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 14px; margin-bottom: 10px; }
+  .goal-card .goal-top { display: flex; justify-content: space-between; font-size: 14px; margin-bottom: 8px; }
+  .goal-card .goal-sub { color: var(--muted); font-size: 12px; }
+  .progress-track { background: #262b35; border-radius: 6px; height: 8px; overflow: hidden; }
+  .progress-fill { background: var(--accent); height: 100%; transition: width 0.3s ease; }
+  .goal-card.locked .progress-fill { background: #fbbf24; }
+  .goal-form { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; }
+  .goal-form input[type="text"], .goal-form input[type="number"], .goal-form input[type="date"] {
+    padding: 10px 12px; border-radius: 8px; border: 1px solid var(--border); background: var(--card); color: var(--text); font-size: 14px;
+  }
+  .goal-form label { font-size: 12px; color: var(--muted); display: flex; align-items: center; gap: 6px; }
+  .category-select {
+    background: var(--card); color: var(--muted); border: 1px solid var(--border); border-radius: 6px;
+    font-size: 11px; padding: 2px 6px; margin-top: 2px;
+  }
 </style>
 </head>
 <body>
 <div class="wrap">
+  <div class="warning-banner" id="warning-banner" style="display: none;"></div>
+
   <h1>Current Balance</h1>
   <div class="balance" id="balance">--</div>
 
@@ -60,6 +82,18 @@
     <div class="lifetime-card">
       <div class="label">Lifetime Spent</div>
       <div class="value" id="lifetime-spent">--</div>
+    </div>
+  </div>
+
+  <div class="section">
+    <h2>Goals</h2>
+    <div id="goals-list"></div>
+    <div class="goal-form">
+      <input type="text" id="goal-name" placeholder="Goal name (e.g. New bike)" />
+      <input type="number" id="goal-amount" placeholder="Target amount ($)" />
+      <input type="date" id="goal-date" />
+      <label><input type="checkbox" id="goal-locked" /> Lock this amount as a protected floor (warns if balance dips below it)</label>
+      <button id="add-goal-btn">Add Goal</button>
     </div>
   </div>
 
@@ -123,6 +157,8 @@
     ).join('') || '<div class="breakdown-row"><span>No purchases yet</span></div>';
   }
 
+  const CATEGORIES = ['Food and Drink', 'Shopping', 'Entertainment', 'Transportation', 'Bills', 'Travel', 'Other', 'Uncategorized'];
+
   async function loadHistory() {
     const res = await apiFetch('/api/history?limit=20');
     const rows = await res.json();
@@ -131,17 +167,89 @@
         <div>
           <div>${r.label}</div>
           <div class="meta">${new Date(r.occurred_at).toLocaleDateString()}</div>
+          ${r.kind === 'debit' ? `
+            <select class="category-select" data-id="${r.id}" onchange="updateCategory(${r.id}, this.value)">
+              ${CATEGORIES.map(c => `<option value="${c}" ${c === r.category ? 'selected' : ''}>${c}</option>`).join('')}
+            </select>
+          ` : ''}
         </div>
         <div class="amount ${r.kind}">${r.kind === 'debit' ? '-' : '+'}${fmt(r.amount)}</div>
       </div>
     `).join('') || '<div class="history-item"><span>Nothing yet</span></div>';
   }
 
+  async function updateCategory(transactionId, category) {
+    await apiFetch(`/api/transactions/${transactionId}/category`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ category }),
+    });
+    loadSpending(); // category breakdown needs to reflect the change
+  }
+  window.updateCategory = updateCategory; // exposed for the inline onchange handler above
+
+  async function loadGoals() {
+    const res = await apiFetch('/api/goals');
+    const goals = await res.json();
+    document.getElementById('goals-list').innerHTML = goals.map(g => `
+      <div class="goal-card ${g.locked ? 'locked' : ''}">
+        <div class="goal-top">
+          <span>${g.name}${g.locked ? ' 🔒' : ''}${g.achieved ? ' ✅' : ''}</span>
+          <span>${fmt(Math.min(g.progressPct >= 100 ? g.targetAmount : (g.progressPct / 100) * g.targetAmount, g.targetAmount))} / ${fmt(g.targetAmount)}</span>
+        </div>
+        <div class="progress-track"><div class="progress-fill" style="width: ${Math.min(g.progressPct, 100)}%"></div></div>
+        ${g.targetDate ? `<div class="goal-sub">Target: ${new Date(g.targetDate).toLocaleDateString()}</div>` : ''}
+      </div>
+    `).join('') || '<div class="goal-sub">No goals yet — add one below.</div>';
+  }
+
+  async function loadWarnings() {
+    const res = await apiFetch('/api/goal-warnings');
+    const warnings = await res.json();
+    const banner = document.getElementById('warning-banner');
+    if (warnings.length === 0) {
+      banner.style.display = 'none';
+      return;
+    }
+    banner.style.display = 'block';
+    banner.innerHTML = warnings.map(w =>
+      `⚠️ Balance is $${w.shortfall.toFixed(2)} below your locked goal "${w.goalName}" ($${w.targetAmount.toFixed(2)})`
+    ).join('<br>');
+  }
+
+  document.getElementById('add-goal-btn').addEventListener('click', async (e) => {
+    e.preventDefault();
+    const name = document.getElementById('goal-name').value.trim();
+    const targetAmount = parseFloat(document.getElementById('goal-amount').value);
+    const targetDate = document.getElementById('goal-date').value || null;
+    const locked = document.getElementById('goal-locked').checked;
+
+    if (!name || !targetAmount) {
+      alert('Give the goal a name and a target amount.');
+      return;
+    }
+
+    await apiFetch('/api/goals', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, targetAmount, targetDate, locked }),
+    });
+
+    document.getElementById('goal-name').value = '';
+    document.getElementById('goal-amount').value = '';
+    document.getElementById('goal-date').value = '';
+    document.getElementById('goal-locked').checked = false;
+    loadGoals();
+    loadWarnings();
+  });
+
   function refreshAll() {
     loadBalance();
     loadEarnings();
     loadSpending();
     loadHistory();
+    loadGoals();
+    loadWarnings();
   }
 
   refreshAll();
